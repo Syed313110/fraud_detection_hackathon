@@ -175,21 +175,18 @@ The analysis combined exploratory data analysis, statistical testing, and machin
 
 1.  **Dual-Axis Chart (Fraud Rate vs. Transaction Volume by Hour)** :
     *   **Purpose:** To visually test Hypothesis 1 (`H1: Time of Day and Fraud`). This chart overlays the line of fraud rate (%) on top of the bar chart of total transaction volume for each hour of the day. It makes the overnight fraud spike immediately apparent, validating that while transaction volume is low between midnight and 4 AM, the *proportion* of those transactions that are fraudulent is significantly higher.
-
+![H1: Time of day and Fraud](Images/Fraudrate-Vbd.png) 
 2.  **Horizontal Bar Chart (Fraud Rate by Merchant Category)** :
     *   **Purpose:** To address Business Requirement 1 and test Hypothesis 2 (`H2: Merchant Category and Fraud`). Sorted from highest to lowest fraud rate, this chart instantly highlights the riskiest merchant categories (e.g., 'grocery_pos', 'shopping_net'). This allows the fraud operations team to prioritize rules or verification steps for specific transaction types.
+
+![H2: Fraud rate by Category](Images/FraudrateVbcat.png)
 
 3.  **Box Plots (Transaction Amount and Home-Merchant Distance by Class)** :
     *   **Purpose:** To visually validate Hypothesis 3 (`H3: Transaction Amount and Geographic Distance`). By showing the distribution (median, quartiles, outliers) of `amt` and `home_merch_dist` for fraudulent vs. legitimate transactions, these plots clearly demonstrate that fraudulent transactions tend to have higher median amounts and significantly larger geographic distances, confirming the engineered feature's value.
 
+![H3: Fraud vs Legitimate transactions](Images/Boxplot.png)
 4.  **Correlation Heatmap** :
     *   **Purpose:** To support feature engineering and model interpretation (Business Requirement 3). This heatmap visualizes the linear correlation between all numerical features (`amt`, `age`, `home_merch_dist`, etc.) and the target `is_fraud` column. It helps identify which features have the strongest direct relationship with fraud and checks for multicollinearity between features (e.g., `amt` and `log_amt`).
-
-5.  **Choropleth Map (Fraud Rate by US State)** :
-    *   **Purpose:** To address Business Requirement 4 by providing an instantly understandable geographic overview for senior leadership. It visually answers the question, "Where is fraud most concentrated geographically?", highlighting states with disproportionately high fraud rates.
-
-6.  **Precision-Recall Curve** :
-    *   **Purpose:** To address the threshold-tuning aspect of Business Requirement 3. This curve visualizes the trade-off between precision and recall for the XGBoost model at all possible classification thresholds. It allows NovaPay to make an informed, business-driven decision on where to set the threshold (e.g., prioritizing high recall to catch more fraud, accepting more false positives).
 
 **Descriptive Statistics:**
 - Mean, median, percentiles for transaction amount, age, and distance
@@ -249,6 +246,29 @@ This project, while rewarding, came with its own set of technical and analytical
 #### Challenge 4: Ethical Data Handling & Feature Selection
 *   **Problem:** The dataset contained columns that could be considered PII (`first`, `last`, `street`, `cc_num`) and potentially biased attributes (`gender`, `age`). Simply including all features in the model would be unethical and could lead to a model that discriminates unfairly.
 *   **Solution:** We established an ethical guideline from the start. All obvious PII columns were dropped during the first step of the ETL pipeline. Features like `gender` and `age` were **excluded from the model features** to prevent them from being used in the fraud classification decision. They were only retained for EDA visualizations to check for data quality or obvious imbalances in the dataset, not to build predictive rules based on them.
+---
+
+### Main Data Analysis & Development Libraries
+
+This project leveraged a range of Python libraries for data processing, analysis, machine learning, and dashboard deployment.
+
+#### Core Data Analysis & Manipulation
+*   **pandas:** For data loading, cleaning, transformation, and aggregation.
+*   **numpy:** For numerical operations, particularly in the Haversine distance calculation.
+
+#### Data Visualization
+*   **matplotlib & seaborn:** Used for generating static plots during EDA (box plots, histograms, heatmaps) and for initial chart prototyping.
+*   **plotly (optional):** *[Mention if used in the Streamlit app for interactive charts]*
+
+#### Machine Learning & Modeling
+*   **scikit-learn:** For the Logistic Regression baseline, train/test splitting, SMOTE, and evaluation metrics (precision, recall, ROC-AUC).
+*   **xgboost:** For the primary predictive model, valued for its performance on imbalanced tabular data and built-in feature importance.
+
+#### Dashboard Development & Deployment
+*   **Power BI:** Used for creating the primary executive and operational dashboard, connecting directly to the processed CSV data.
+*   **streamlit:** Used to build the supplementary, interactive web application for technical exploration.
+*   **streamlit-aggrid:** *[Optional: Add if used for interactive tables in Streamlit]*
+*   **Pillow / PIL:** *[Often used in Streamlit for image handling, if you display logos or static images]*
 
 ## Ethical Considerations
 
@@ -324,26 +344,8 @@ To meet Business Requirement 4—providing insights to both technical and non-te
 
 The dashboard was built in Power BI Desktop and published to Power BI Service.
 
-`[Add your published dashboard link here once deployed]`
+`[https://app.powerbi.com/groups/me/reports/c905dbfb-12c9-4f6c-8399-be3ee104a970/8b1b638210262dc40015?experience=power-bi]`
 
-**To view the dashboard locally:**
-
-1. Ensure [Power BI Desktop](https://powerbi.microsoft.com/en-us/desktop/) is installed (free, Windows only)
-2. Clone this repository: `git clone https://github.com/[YOUR_USERNAME]/fraud-detection-project`
-3. Open `dashboard/fraud_detection_dashboard.pbix` in Power BI Desktop
-4. When prompted, update the data source path to point to `data/processed/transactions_processed.csv` on your local machine
-
-**To reproduce the full analysis pipeline:**
-
-1. Install dependencies: `pip install -r requirements.txt`
-2. Set up Kaggle API credentials — place `kaggle.json` in `~/.kaggle/` (never commit this file)
-3. Run the data download:
-```bash
-kaggle datasets download -d kartik2112/fraud-detection -p data/raw --unzip
-```
-4. Run notebooks in order from `notebooks/v1/`
-
----
 
 ## Main Data Analysis Libraries
 
