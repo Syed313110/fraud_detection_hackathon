@@ -167,7 +167,29 @@ The four distinct chart types used across the dashboard are: **bar chart** (clas
 
 ---
 
-## Analysis Techniques Used
+### Analysis Techniques Used
+
+The analysis combined exploratory data analysis, statistical testing, and machine learning, with a strong emphasis on clear visual communication.
+
+#### Visualisations & Analytical Purpose
+
+1.  **Dual-Axis Chart (Fraud Rate vs. Transaction Volume by Hour)** :
+    *   **Purpose:** To visually test Hypothesis 1 (`H1: Time of Day and Fraud`). This chart overlays the line of fraud rate (%) on top of the bar chart of total transaction volume for each hour of the day. It makes the overnight fraud spike immediately apparent, validating that while transaction volume is low between midnight and 4 AM, the *proportion* of those transactions that are fraudulent is significantly higher.
+
+2.  **Horizontal Bar Chart (Fraud Rate by Merchant Category)** :
+    *   **Purpose:** To address Business Requirement 1 and test Hypothesis 2 (`H2: Merchant Category and Fraud`). Sorted from highest to lowest fraud rate, this chart instantly highlights the riskiest merchant categories (e.g., 'grocery_pos', 'shopping_net'). This allows the fraud operations team to prioritize rules or verification steps for specific transaction types.
+
+3.  **Box Plots (Transaction Amount and Home-Merchant Distance by Class)** :
+    *   **Purpose:** To visually validate Hypothesis 3 (`H3: Transaction Amount and Geographic Distance`). By showing the distribution (median, quartiles, outliers) of `amt` and `home_merch_dist` for fraudulent vs. legitimate transactions, these plots clearly demonstrate that fraudulent transactions tend to have higher median amounts and significantly larger geographic distances, confirming the engineered feature's value.
+
+4.  **Correlation Heatmap** :
+    *   **Purpose:** To support feature engineering and model interpretation (Business Requirement 3). This heatmap visualizes the linear correlation between all numerical features (`amt`, `age`, `home_merch_dist`, etc.) and the target `is_fraud` column. It helps identify which features have the strongest direct relationship with fraud and checks for multicollinearity between features (e.g., `amt` and `log_amt`).
+
+5.  **Choropleth Map (Fraud Rate by US State)** :
+    *   **Purpose:** To address Business Requirement 4 by providing an instantly understandable geographic overview for senior leadership. It visually answers the question, "Where is fraud most concentrated geographically?", highlighting states with disproportionately high fraud rates.
+
+6.  **Precision-Recall Curve** :
+    *   **Purpose:** To address the threshold-tuning aspect of Business Requirement 3. This curve visualizes the trade-off between precision and recall for the XGBoost model at all possible classification thresholds. It allows NovaPay to make an informed, business-driven decision on where to set the threshold (e.g., prioritizing high recall to catch more fraud, accepting more false positives).
 
 **Descriptive Statistics:**
 - Mean, median, percentiles for transaction amount, age, and distance
@@ -208,6 +230,25 @@ Claude (Anthropic) was used to assist with code templates, hypothesis framing, f
 - The dataset lacks per-customer transaction history, preventing velocity features (e.g. number of transactions in the last hour per card) which are highly valuable in real fraud detection systems.
 
 ---
+### Development Roadmap & Challenges Faced
+
+This project, while rewarding, came with its own set of technical and analytical challenges. Here’s a look at the key hurdles and how they were addressed:
+
+#### Challenge 1: Handling Extreme Class Imbalance
+*   **Problem:** The dataset had a fraud rate of only ~0.58%. Training a model on this raw data would result in a model that simply predicts "not fraud" for every transaction, achieving 99.42% accuracy but being completely useless.
+*   **Solution:** We implemented **SMOTE (Synthetic Minority Over-sampling Technique)** during the training phase only. This created synthetic samples of the minority class (fraud) to balance the training data, forcing the model to learn the patterns of fraud. We were extremely careful *not* to apply SMOTE to the test set, ensuring our evaluation metrics were realistic and unbiased.
+
+#### Challenge 2: Creating a Meaningful Geographic Feature
+*   **Problem:** The raw data provided separate coordinates for the cardholder (`lat`, `long`) and the merchant (`merch_lat`, `merch_long`), but no single feature indicating proximity. A transaction far from home is a classic fraud signal, but the raw columns didn't capture this relationship.
+*   **Solution:** We engineered the `home_merch_dist` feature by applying the **Haversine formula**. This calculates the great-circle distance between two points on a sphere (the Earth), giving us a single, powerful, and interpretable numeric feature that directly represents geographic displacement.
+
+#### Challenge 3: Designing for Two Distinct Audiences
+*   **Problem:** Business Requirement 4 explicitly called for a dashboard useful for both the fraud operations team (who need granular data) and senior leadership (who need high-level summaries). One single dashboard page would fail to serve either group effectively.
+*   **Solution:** We pivoted from a single-dashboard approach to a **two-dashboard strategy**. The Power BI dashboard was designed with two separate pages—one for executives and one for analysts. To further cater to technical needs, we built a separate Streamlit app, providing a flexible environment for ad-hoc data exploration and model interaction.
+
+#### Challenge 4: Ethical Data Handling & Feature Selection
+*   **Problem:** The dataset contained columns that could be considered PII (`first`, `last`, `street`, `cc_num`) and potentially biased attributes (`gender`, `age`). Simply including all features in the model would be unethical and could lead to a model that discriminates unfairly.
+*   **Solution:** We established an ethical guideline from the start. All obvious PII columns were dropped during the first step of the ETL pipeline. Features like `gender` and `age` were **excluded from the model features** to prevent them from being used in the fraud classification decision. They were only retained for EDA visualizations to check for data quality or obvious imbalances in the dataset, not to build predictive rules based on them.
 
 ## Ethical Considerations
 
@@ -230,40 +271,41 @@ This project is built for educational and portfolio purposes only. The model is 
 
 ---
 
-## Dashboard Design
+### Dashboard Design & Deployment
 
-### Planned Dashboard Pages
+To meet Business Requirement 4—providing insights to both technical and non-technical stakeholders—we developed **two complementary interactive dashboards**. This dual approach ensures accessibility and depth for all users.
 
-**Page 1 — Executive Summary (Non-technical audience: NovaPay senior leadership)**
+#### 1. Power BI Dashboard (For Senior Leadership & Fraud Ops)
+**Design Philosophy:** Clean, executive-focused, and narrative-driven. The design prioritizes key insights and allows for guided exploration.
 
-- KPI cards: total transactions analysed, total fraud detected, overall fraud rate (%), estimated financial exposure
-- Fraud rate by merchant category — horizontal bar chart, colour-scaled by risk level
-- Fraud rate and volume by hour of day — dual-axis chart
-- Choropleth map of fraud rate by US state
-- Plain-English narrative text boxes summarising key findings and recommendations
-- Slicers: merchant category, transaction amount range
-- No model metrics or technical terminology on this page
+*   **Pages:**
+    *   **Executive Summary Page:** Features high-level KPIs (total transactions, total fraud, overall fraud rate), the choropleth map for geographic risk, and the dual-axis chart for fraud by hour. The goal is to provide an immediate, boardroom-ready overview.
+    *   **Deep Dive Analysis Page:** Includes the fraud-by-category bar chart, box plots for amount/distance, and model performance metrics (feature importance). Slicers for `merchant category`, `state`, and `hour` allow the fraud operations team to filter and investigate specific segments.
 
-**Page 2 — Fraud Analysis (Technical audience: fraud operations team)**
+*   **Key Design Choices:**
+    *   **Narrative Flow:** The layout guides the user from "What is the overall problem?" (summary) to "Where exactly is it happening?" (detailed analysis).
+    *   **Interactivity:** Slicers and drill-through actions enable dynamic exploration without overwhelming the main view.
+    *   **Clarity:** Chart titles and tooltips are written in plain English, explaining what the user should observe (e.g., "Fraud rate spikes to >2% in the early morning hours").
 
-- Feature importance horizontal bar chart (top 10 XGBoost features — all labelled in plain English)
-- Transaction amount by class — box plot with median annotations
-- Home-to-merchant distance by class — box plot
-- Correlation heatmap of engineered features
-- Confusion matrix with estimated cost-per-missed-fraud annotation
-- Precision-recall curve with selected threshold highlighted
-- Drill-through transaction table: filterable by predicted class, merchant category, transaction hour, and amount
+**🔗 Access the Power BI Dashboard here:** [Fraud Detection Power BI Dashboard](https://app.powerbi.com/groups/me/reports/c905dbfb-12c9-4f6c-8399-be3ee104a970/8b1b638210262dc40015?experience=power-bi)
 
-**How data insights were communicated to different audiences:**
-Technical metrics (precision, recall, F1-score, ROC-AUC) appear only on Page 2 with annotations explaining what each means in business terms. Page 1 translates these into plain-language summaries. All chart titles are framed as business questions rather than technical labels — for example, "Which merchant types carry the highest fraud risk?" rather than "Fraud rate by category."
+![Fraud Analysis](Images/PowerBI1.png) 
+--
+![Fraud Operations Team](Images/PowerBI2.png)
 
----
+#### 2. Streamlit Dashboard (For Technical Exploration & Model Interaction)
+**Design Philosophy:** Interactive, code-backed, and focused on the model. This dashboard allows for deeper technical exploration and what-if analysis.
 
-## Unfixed Bugs
+*   **Features:**
+    *   **Data Explorer:** An interactive table to view the raw processed data, filter by conditions, and download subsets.
+    *   **Dynamic EDA:** Users can select any feature (e.g., `amt`, `home_merch_dist`, `age`) and instantly generate histograms and box plots comparing distributions for fraud vs. non-fraud transactions.
+    *   **Model Playground:** A section where users can adjust the classification threshold via a slider and see the impact on the confusion matrix, precision, recall, and F1-score in real-time. This makes the model's trade-off tangible.
 
-`[Document any bugs here and why they were not resolved. If none, state: No unfixed bugs were identified during development.]`
+*   **Deployment:** The Streamlit app is hosted on the Streamlit Community Cloud, making it easily accessible via a web link.
 
----
+**🔗 Access the Streamlit Dashboard here:** *[LINK_TO_YOUR_STREAMLIT_APP]* (add link here-Sundeep)
+
+
 
 ## Development Roadmap
 
