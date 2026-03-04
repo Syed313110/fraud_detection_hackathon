@@ -77,12 +77,46 @@ section[data-testid="stSidebar"] { background-color: #0b1120; border-right: 1px 
 .hyp-finding{ font-size:11px; color:#94a3b8; margin-top:10px; }
 
 /* Tab styling */
-.stTabs [data-baseweb="tab-list"] { background:#0b1120; border-bottom:1px solid #1a2d47; gap:2px; }
-.stTabs [data-baseweb="tab"]      { font-family:'DM Mono',monospace; font-size:11px; letter-spacing:1px; color:#3d5570; }
-.stTabs [aria-selected="true"]    { color:#00e5ff !important; background:#080d18 !important; border-bottom:2px solid #00e5ff !important; }
+.stTabs [data-baseweb="tab-list"] {
+    background:#0b1120;
+    border-bottom:1px solid #1a2d47;
+    gap:6px;
+    padding:2px 0;
+    flex-wrap:nowrap;
+    width:100%;
+}
+.stTabs [data-baseweb="tab"] {
+    font-family:'DM Mono',monospace;
+    font-size:11px;
+    letter-spacing:1px;
+    color:#64748b;
+    background:#0b1120;
+    border:1px solid #1a2d47;
+    padding:6px 8px;
+    border-radius:8px;
+    flex:1 1 0;
+    justify-content:center;
+}
+.stTabs [data-baseweb="tab"]:hover { color:#94a3b8; border-color:#2b4669; }
+.stTabs [aria-selected="true"] {
+    color:#00e5ff !important;
+    background:#080d18 !important;
+    border:1px solid #1a3050 !important;
+    box-shadow: inset 0 -2px 0 #00e5ff;
+}
 
 /* Chart container styling */
-div[data-testid="stPlotlyChart"]  { border:1px solid #1a3050; border-radius:12px; overflow:hidden; }
+div[data-testid="stPlotlyChart"]  {
+    border:1px solid #1a3050;
+    border-radius:12px;
+    overflow:hidden;
+    margin-top:8px;
+    margin-bottom:18px;
+}
+
+/* Give metric rows and info blocks breathing room */
+div[data-testid="stMetric"] { margin-bottom:10px; }
+div[data-testid="stAlert"]  { margin:8px 0 14px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -202,7 +236,13 @@ with st.sidebar:
         help="Lower threshold = more fraud alerts (more false positives)"
     )
 
+    # Data source information
+    st.markdown('<div class="sec-head">SOURCE</div>', unsafe_allow_html=True)
+    st.caption(DATA_PATH)
+    st.caption(f"Total rows: {len(df):,}")
+
     # Allow user to upload additional transactions CSV
+    st.markdown('<div class="sec-head">UPLOAD</div>', unsafe_allow_html=True)
     uploaded = st.file_uploader("Upload more transactions (CSV)", type=["csv"])
     if uploaded is not None:
         try:
@@ -211,11 +251,6 @@ with st.sidebar:
             st.success(f"Added {len(new_df)} rows, new total {len(df)}")
         except Exception as e:
             st.error(f"Failed to read uploaded file: {e}")
-            
-    # Data source information
-    st.markdown('<div class="sec-head">SOURCE</div>', unsafe_allow_html=True)
-    st.caption(DATA_PATH)
-    st.caption(f"Total rows: {len(df):,}")
 
     # Provide CSV template for correct structure
     st.markdown('<div class="sec-head">TEMPLATE</div>', unsafe_allow_html=True)
@@ -333,172 +368,203 @@ with tab1:
 
     c1, c2 = st.columns(2)
 
-    # Donut — fraud split
+    # Hour chart: volume + fraud rate
     with c1:
-        vc = dff["is_fraud"].value_counts().reset_index()
-        vc.columns = ["is_fraud","count"]
-        vc["label"] = vc["is_fraud"].map({0:"Legitimate",1:"Fraudulent"})
-        fig = go.Figure(go.Pie(
-            labels=vc["label"], values=vc["count"], hole=0.62,
-            marker=dict(colors=[COLORS["legit"], COLORS["fraud"]],
-                        line=dict(color="#080d18", width=3)),
-            textfont=dict(family=FONT, color="#94a3b8"),
+        hourly = dff.groupby("trans_hour")["is_fraud"].agg(["sum", "count"]).reset_index()
+        hourly.columns = ["hour", "fraud", "total"]
+        hourly["rate"] = hourly["fraud"] / hourly["total"] * 100
+
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        fig.add_trace(go.Bar(
+            x=hourly["hour"], y=hourly["total"], name="Total",
+            marker_color="#1a3050", opacity=0.9
+        ), secondary_y=False)
+        fig.add_trace(go.Scatter(
+            x=hourly["hour"], y=hourly["rate"], name="Fraud Rate %",
+            mode="lines+markers", line=dict(color=COLORS["fraud"], width=2.5), marker=dict(size=6)
+        ), secondary_y=True)
+        fig.update_layout(base_layout(
+            title="Hourly Volume & Fraud Rate", height=320,
+            xaxis=dict(title="Hour", tickmode="linear", dtick=1),
+            legend=dict(orientation="h", y=-0.2)
         ))
-        fig.add_annotation(text=f"<b>{fraud_rate:.1f}%</b><br>Fraud",
-                           x=0.5, y=0.5, showarrow=False,
-                           font=dict(family="Syne,sans-serif", size=18, color="#ff4560"))
-        fig.update_layout(base_layout(title="Fraud vs Legitimate Split", height=300))
+        fig.update_yaxes(title_text="Transactions", secondary_y=False)
+        fig.update_yaxes(title_text="Fraud Rate %", ticksuffix="%", showgrid=False,
+                         color=COLORS["fraud"], secondary_y=True)
         st.plotly_chart(fig, use_container_width=True)
 
-    # Monthly trend
+    # Category chart: fraud rate by merchant category
     with c2:
-        mo = dff.groupby("trans_month")["is_fraud"].agg(["sum","count"]).reset_index()
-        mo.columns = ["month","fraud","total"]
-        mo["rate"] = mo["fraud"] / mo["total"] * 100
-        mnames = {1:"Jan",2:"Feb",3:"Mar",4:"Apr",5:"May",6:"Jun",
-                  7:"Jul",8:"Aug",9:"Sep",10:"Oct",11:"Nov",12:"Dec"}
-        mo["mon"] = mo["month"].map(mnames)
-        fig = make_subplots(specs=[[{"secondary_y":True}]])
-        fig.add_trace(go.Bar(x=mo["mon"], y=mo["total"], name="Total",
-                             marker_color="#1a3050"), secondary_y=False)
-        fig.add_trace(go.Bar(x=mo["mon"], y=mo["fraud"], name="Fraud",
-                             marker_color=COLORS["fraud"]), secondary_y=False)
-        fig.add_trace(go.Scatter(x=mo["mon"], y=mo["rate"], name="Fraud Rate %",
-                                 mode="lines+markers",
-                                 line=dict(color=COLORS["amber"], width=2),
-                                 marker=dict(size=5)), secondary_y=True)
-        fig.update_layout(base_layout(title="Monthly Transactions & Fraud Rate",
-                                      barmode="overlay", height=300,
-                                      legend=dict(orientation="h", y=-0.18)))
-        fig.update_yaxes(gridcolor=GRID, secondary_y=False)
-        fig.update_yaxes(showgrid=False, ticksuffix="%",
-                         color=COLORS["amber"], secondary_y=True)
+        cat_s = (dff.groupby("category")["is_fraud"]
+                 .agg(fraud_count="sum", total="count").reset_index())
+        cat_s["fraud_rate"] = cat_s["fraud_count"] / cat_s["total"] * 100
+        cat_s = cat_s.sort_values("fraud_rate", ascending=False).head(12)
+        cat_s = cat_s.sort_values("fraud_rate", ascending=True)
+
+        fig = go.Figure(go.Bar(
+            y=cat_s["category"], x=cat_s["fraud_rate"], orientation="h",
+            marker_color=COLORS["purple"], text=cat_s["fraud_rate"].map(lambda x: f"{x:.1f}%"),
+            textposition="outside", name="Fraud Rate"
+        ))
+        fig.update_layout(base_layout(
+            title="Top 12 Categories by Fraud Rate", height=320,
+            xaxis=dict(title="Fraud Rate (%)", ticksuffix="%"),
+            yaxis=dict(title="")
+        ))
         st.plotly_chart(fig, use_container_width=True)
 
     c3, c4 = st.columns(2)
 
-    # Log-amount histogram
+    # Gender chart
     with c3:
-        fig = go.Figure()
-        for lab, val, col in [("Legitimate",0,COLORS["legit"]),("Fraudulent",1,COLORS["fraud"])]:
-            fig.add_trace(go.Histogram(x=dff[dff["is_fraud"]==val]["log_amt"],
-                                       name=lab, opacity=0.75, marker_color=col, nbinsx=50))
-        fig.update_layout(base_layout(title="Log(Amount) Distribution",
-                                      barmode="overlay", height=300))
-        st.plotly_chart(fig, use_container_width=True)
-
-    # Gender bar
-    with c4:
         if "gender" in dff.columns:
-            gdf = dff.groupby(["gender","is_fraud"]).size().reset_index(name="count")
-            gdf["label"] = gdf["is_fraud"].map({0:"Legitimate",1:"Fraudulent"})
-            fig = px.bar(gdf, x="gender", y="count", color="label", barmode="group",
-                         color_discrete_map={"Legitimate":COLORS["legit"],"Fraudulent":COLORS["fraud"]},
-                         title="Transactions by Gender")
-            fig.update_layout(base_layout(height=300, legend=dict(orientation="h",y=-0.18)))
+            gdf = dff.groupby("gender")["is_fraud"].agg(["sum", "count"]).reset_index()
+            gdf.columns = ["gender", "fraud", "total"]
+            gdf["fraud_rate"] = np.where(gdf["total"] > 0, gdf["fraud"] / gdf["total"] * 100, 0)
+            overall_rate = dff["is_fraud"].mean() * 100
+            max_total = gdf["total"].max() if len(gdf) else 0
+            gdf["bubble_size"] = np.where(max_total > 0, 18 + (gdf["total"] / max_total) * 24, 18)
+
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=gdf["total"],
+                y=gdf["fraud_rate"],
+                mode="markers+text",
+                text=gdf["gender"],
+                textposition="top center",
+                marker=dict(
+                    size=gdf["bubble_size"],
+                    color=COLORS["purple"],
+                    line=dict(color="#a78bfa", width=1.5),
+                    opacity=0.82,
+                ),
+                customdata=gdf[["fraud", "total"]].values,
+                hovertemplate="Gender=%{text}<br>Fraud Rate=%{y:.2f}%<br>Fraud Txns=%{customdata[0]:,}<br>Total Txns=%{customdata[1]:,}<extra></extra>",
+                name="Gender"
+            ))
+            fig.add_hline(
+                y=overall_rate,
+                line_dash="dash",
+                line_color=COLORS["amber"],
+                annotation_text=f"Overall: {overall_rate:.2f}%",
+                annotation_position="top right"
+            )
+            fig.update_layout(base_layout(
+                title="Gender Risk: Fraud Rate vs Transaction Volume",
+                height=320,
+                xaxis=dict(title="Transaction Volume"),
+                yaxis=dict(title="Fraud Rate (%)", ticksuffix="%")
+            ))
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("Gender column not available in dataset.")
 
-    # Age histogram
-    fig = go.Figure()
-    for lab, val, col in [("Legitimate",0,COLORS["legit"]),("Fraudulent",1,COLORS["fraud"])]:
-        fig.add_trace(go.Histogram(x=dff[dff["is_fraud"]==val]["age"],
-                                   name=lab, opacity=0.75, marker_color=col, nbinsx=40))
-    fig.update_layout(base_layout(title="Cardholder Age Distribution",
-                                  barmode="overlay", height=280))
-    st.plotly_chart(fig, use_container_width=True)
+    # Age chart
+    with c4:
+        age_bins = [18, 25, 35, 45, 55, 65, 100]
+        age_labels = ["18-24", "25-34", "35-44", "45-54", "55-64", "65+"]
+        age_df = dff.copy()
+        age_df["age_band"] = pd.cut(age_df["age"], bins=age_bins, labels=age_labels, right=False)
+
+        adf = age_df.groupby("age_band", observed=False)["is_fraud"].agg(["sum", "count"]).reset_index()
+        adf.columns = ["age_band", "fraud", "total"]
+        adf = adf.dropna(subset=["age_band"])
+        adf["fraud_rate"] = np.where(adf["total"] > 0, adf["fraud"] / adf["total"] * 100, 0)
+
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        fig.add_trace(go.Bar(
+            x=adf["age_band"],
+            y=adf["total"],
+            name="Total",
+            marker_color="#1a3050",
+            opacity=0.85
+        ), secondary_y=False)
+        fig.add_trace(go.Scatter(
+            x=adf["age_band"],
+            y=adf["fraud_rate"],
+            name="Fraud Rate %",
+            mode="lines+markers",
+            line=dict(color=COLORS["fraud"], width=3),
+            marker=dict(size=7)
+        ), secondary_y=True)
+        fig.update_layout(base_layout(
+            title="Fraud Rate Across Age Bands",
+            height=320,
+            legend=dict(orientation="h", y=-0.2)
+        ))
+        fig.update_yaxes(title_text="Transactions", secondary_y=False)
+        fig.update_yaxes(
+            title_text="Fraud Rate (%)",
+            ticksuffix="%",
+            showgrid=False,
+            color=COLORS["fraud"],
+            secondary_y=True,
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
 
 # TAB 2: TIME OF DAY ANALYSIS
 # This tab tests if fraud happens more at certain times of day
 with tab2:
-    st.markdown("""
-    <div class="hyp-card">
-      <span class="chip chip-blue">H1</span>
-      <div class="hyp-title">Time of Day & Fraud</div>
-      <div class="hyp-body">
-        <b>Research Hypothesis:</b> Fraudulent transactions are significantly more likely during late-night
-        hours (00:00–04:00), reflecting fraudsters exploiting periods of reduced monitoring.<br><br>
-        <b>Null Hypothesis H₀:</b> No statistically significant difference in fraud rate between
-        late-night and other hours.
-      </div>
-    </div>""", unsafe_allow_html=True)
+    st.markdown('<div class="sec-head">TIME OF DAY ANALYSIS</div>', unsafe_allow_html=True)
+    st.caption("Compare late-night risk with other hours, then review hourly and day-hour patterns.")
 
-    hourly = dff.groupby("trans_hour")["is_fraud"].agg(["sum","count"]).reset_index()
-    hourly.columns = ["hour","fraud","total"]
-    hourly["rate"] = hourly["fraud"] / hourly["total"] * 100
+    hourly = (dff.groupby("trans_hour")["is_fraud"]
+              .agg(fraud="sum", total="count")
+              .reindex(range(24), fill_value=0)
+              .reset_index()
+              .rename(columns={"trans_hour": "hour"}))
+    hourly["rate"] = np.where(hourly["total"] > 0, hourly["fraud"] / hourly["total"] * 100, 0)
 
-    c1, c2 = st.columns([2,1])
-    with c1:
-        fig = make_subplots(specs=[[{"secondary_y":True}]])
-        fig.add_trace(go.Bar(x=hourly["hour"], y=hourly["total"], name="Total",
-                             marker_color="#1a3050"), secondary_y=False)
-        fig.add_trace(go.Bar(x=hourly["hour"], y=hourly["fraud"], name="Fraud",
-                             marker_color=COLORS["fraud"]), secondary_y=False)
-        fig.add_trace(go.Scatter(x=hourly["hour"], y=hourly["rate"],
-                                 name="Fraud Rate %", mode="lines+markers",
-                                 line=dict(color=COLORS["amber"], width=2.5),
-                                 marker=dict(size=6)), secondary_y=True)
-        fig.add_vrect(x0=-0.5, x1=3.5, fillcolor="rgba(255,69,96,0.07)", line_width=0,
-                      annotation_text="Late Night", annotation_position="top left",
-                      annotation_font=dict(color="#ff4560", size=10))
-        fig.add_vrect(x0=21.5, x1=23.5, fillcolor="rgba(255,69,96,0.07)", line_width=0)
-        fig.update_layout(base_layout(title="Hourly Fraud Distribution", barmode="overlay", height=360,
-                                      xaxis=dict(title="Hour of Day", tickmode="linear", dtick=1),
-                                      legend=dict(orientation="h", y=-0.15)))
-        fig.update_yaxes(title_text="Count", gridcolor=GRID, secondary_y=False)
-        fig.update_yaxes(title_text="Fraud Rate %", showgrid=False,
-                         ticksuffix="%", color=COLORS["amber"], secondary_y=True)
-        st.plotly_chart(fig, use_container_width=True)
+    late  = dff[dff["trans_hour"].between(0,3)]
+    other = dff[~dff["trans_hour"].between(0,3)]
+    late_rate  = late["is_fraud"].mean()*100  if len(late)>0 else 0
+    other_rate = other["is_fraud"].mean()*100 if len(other)>0 else 0
+    cont = np.array([[late["is_fraud"].sum(), len(late)-late["is_fraud"].sum()],
+                     [other["is_fraud"].sum(), len(other)-other["is_fraud"].sum()]])
+    if cont.min() > 0:
+        chi2, pval, _, _ = stats.chi2_contingency(cont)
+    else:
+        chi2, pval = 0.0, 1.0
+    risk_gap = late_rate - other_rate
 
-    with c2:
-        late  = dff[dff["trans_hour"].between(0,3)]
-        other = dff[~dff["trans_hour"].between(0,3)]
-        late_rate  = late["is_fraud"].mean()*100  if len(late)>0 else 0
-        other_rate = other["is_fraud"].mean()*100 if len(other)>0 else 0
-        cont = np.array([[late["is_fraud"].sum(), len(late)-late["is_fraud"].sum()],
-                         [other["is_fraud"].sum(), len(other)-other["is_fraud"].sum()]])
-        if cont.min() > 0:
-            chi2, pval, _, _ = stats.chi2_contingency(cont)
-        else:
-            chi2, pval = 0.0, 1.0
-        chip = "chip-red" if pval < 0.05 else "chip-green"
-        verdict = "REJECT H₀" if pval < 0.05 else "FAIL TO REJECT H₀"
-        finding = (
-            f"Late-night (00–03) fraud rate: <b>{late_rate:.1f}%</b> "
-            f"vs <b>{other_rate:.1f}%</b> other hours. "
-            f"χ²={chi2:.1f}, p={pval:.4f}. "
-            + ("<b>Time of day is a significant fraud signal.</b>"
-               if pval < 0.05 else "No significant difference detected.")
-        )
-        st.markdown(f"""
-        <div class="hyp-card">
-          <div class="kpi-label">Chi-Square Test</div>
-          <div style="margin:8px 0;"><span class="chip {chip}">{verdict}</span></div>
-          <div style="margin-bottom:10px;">
-            <div class="kpi-label">χ² Statistic</div>
-            <div style="font-family:Syne,sans-serif;font-size:24px;font-weight:800;color:#f0f6ff;">{chi2:.2f}</div>
-          </div>
-          <div style="margin-bottom:10px;">
-            <div class="kpi-label">p-value</div>
-            <div style="font-family:Syne,sans-serif;font-size:24px;font-weight:800;
-                 color:{'#ff4560' if pval<0.05 else '#00e676'};">{pval:.4f}</div>
-          </div>
-          <div class="hyp-finding">{finding}</div>
-        </div>""", unsafe_allow_html=True)
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Late-Night Fraud %", f"{late_rate:.2f}%")
+    m2.metric("Other Hours Fraud %", f"{other_rate:.2f}%")
+    m3.metric("Risk Gap", f"{risk_gap:+.2f} pp")
+    m4.metric("p-value", f"{pval:.4f}")
 
-    # Heatmap: day × hour
-    doh = dff.groupby(["trans_dayofweek","trans_hour"])["is_fraud"].mean().reset_index()
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    fig.add_trace(go.Bar(
+        x=hourly["hour"], y=hourly["total"], name="Total",
+        marker_color="#1a3050", opacity=0.9
+    ), secondary_y=False)
+    fig.add_trace(go.Scatter(
+        x=hourly["hour"], y=hourly["rate"], name="Fraud Rate %",
+        mode="lines+markers", line=dict(color=COLORS["fraud"], width=2.5), marker=dict(size=6)
+    ), secondary_y=True)
+    fig.add_vrect(x0=-0.5, x1=3.5, fillcolor="rgba(255,69,96,0.08)", line_width=0)
+    fig.add_vrect(x0=21.5, x1=23.5, fillcolor="rgba(255,69,96,0.08)", line_width=0)
+    fig.update_layout(base_layout(
+        title="Hourly Volume & Fraud Rate", height=340,
+        xaxis=dict(title="Hour", tickmode="linear", dtick=1),
+        legend=dict(orientation="h", y=-0.2)
+    ))
+    fig.update_yaxes(title_text="Transactions", secondary_y=False)
+    fig.update_yaxes(title_text="Fraud Rate %", ticksuffix="%", showgrid=False,
+                     color=COLORS["fraud"], secondary_y=True)
+    st.plotly_chart(fig, use_container_width=True)
+
+    doh = dff.groupby(["trans_dayofweek", "trans_hour"])["is_fraud"].mean().reset_index()
     pivot = doh.pivot(index="trans_dayofweek", columns="trans_hour", values="is_fraud").fillna(0)
-    dlabels = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
+    dlabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     fig = go.Figure(go.Heatmap(
         z=pivot.values, x=list(range(24)),
         y=[dlabels[i] for i in pivot.index],
-        colorscale=[[0,"#0b1929"],[0.5,"#7c3aed"],[1,"#ff4560"]],
+        colorscale=[[0, "#0b1929"], [1, "#ff4560"]],
         colorbar=dict(title="Fraud Rate"),
     ))
-    fig.update_layout(base_layout(title="Fraud Rate Heatmap — Day of Week × Hour", height=280,
+    fig.update_layout(base_layout(title="Fraud Rate Heatmap — Day × Hour", height=280,
                                   xaxis=dict(title="Hour", tickmode="linear", dtick=1)))
     st.plotly_chart(fig, use_container_width=True)
 
@@ -506,17 +572,8 @@ with tab2:
 # TAB 3: MERCHANT CATEGORY ANALYSIS
 # This tab tests if certain merchant categories have more fraud
 with tab3:
-    st.markdown("""
-    <div class="hyp-card">
-      <span class="chip chip-blue">H2</span>
-      <div class="hyp-title">Merchant Category & Fraud</div>
-      <div class="hyp-body">
-        <b>Research Hypothesis:</b> Online shopping and miscellaneous online categories will show
-        disproportionately higher fraud rates than in-person categories.<br><br>
-        <b>Null Hypothesis H₀:</b> No statistically significant association between merchant category
-        and fraud likelihood.
-      </div>
-    </div>""", unsafe_allow_html=True)
+    st.markdown('<div class="sec-head">MERCHANT CATEGORY ANALYSIS</div>', unsafe_allow_html=True)
+    st.caption("Compare category fraud risk, volume, and where risk concentrates.")
 
     cat_s = (dff.groupby("category")["is_fraud"]
              .agg(fraud_count="sum", total="count").reset_index())
@@ -524,81 +581,49 @@ with tab3:
     cat_s["legit_count"] = cat_s["total"] - cat_s["fraud_count"]
     cat_s = cat_s.sort_values("fraud_rate", ascending=True)
 
-    c1, c2 = st.columns([2,1])
-    with c1:
-        fig = go.Figure(go.Bar(
-            y=cat_s["category"], x=cat_s["fraud_rate"], orientation="h",
-            marker=dict(color=cat_s["fraud_rate"],
-                        colorscale=[[0,"#1a3050"],[0.5,"#a78bfa"],[1,"#ff4560"]],
-                        showscale=True, colorbar=dict(title="%", x=1.01)),
-            text=cat_s["fraud_rate"].apply(lambda x: f"{x:.1f}%"),
-            textposition="outside",
-        ))
-        fig.update_layout(base_layout(title="Fraud Rate by Merchant Category", height=420,
-                                      xaxis=dict(title="Fraud Rate (%)", ticksuffix="%"),
-                                      yaxis=dict(title="")))
-        st.plotly_chart(fig, use_container_width=True)
+    cont_cat = cat_s[["fraud_count", "legit_count"]].values
+    if cont_cat.min() > 0:
+        chi2_c, p_c, dof_c, _ = stats.chi2_contingency(cont_cat)
+    else:
+        chi2_c, p_c, dof_c = 0.0, 1.0, 0
+    top = cat_s.sort_values("fraud_rate", ascending=False).iloc[0]
 
-    with c2:
-        cont_cat = cat_s[["fraud_count","legit_count"]].values
-        if cont_cat.min() > 0:
-            chi2_c, p_c, dof_c, _ = stats.chi2_contingency(cont_cat)
-        else:
-            chi2_c, p_c, dof_c = 0.0, 1.0, 0
-        chip = "chip-red" if p_c < 0.05 else "chip-green"
-        verdict = "REJECT H₀" if p_c < 0.05 else "FAIL TO REJECT H₀"
-        top = cat_s.sort_values("fraud_rate", ascending=False).iloc[0]
-        st.markdown(f"""
-        <div class="hyp-card">
-          <div class="kpi-label">Chi-Square Test</div>
-          <div style="margin:8px 0;"><span class="chip {chip}">{verdict}</span></div>
-          <div style="margin-bottom:10px;">
-            <div class="kpi-label">χ² Statistic</div>
-            <div style="font-family:Syne,sans-serif;font-size:24px;font-weight:800;color:#f0f6ff;">{chi2_c:.1f}</div>
-          </div>
-          <div style="margin-bottom:10px;">
-            <div class="kpi-label">p-value</div>
-            <div style="font-family:Syne,sans-serif;font-size:24px;font-weight:800;
-                 color:{'#ff4560' if p_c<0.05 else '#00e676'};">{p_c:.4f}</div>
-          </div>
-          <div style="margin-bottom:10px;">
-            <div class="kpi-label">Degrees of Freedom</div>
-            <div style="font-family:Syne,sans-serif;font-size:20px;font-weight:700;color:#f0f6ff;">{dof_c}</div>
-          </div>
-          <div class="hyp-finding">
-            Highest risk: <b>{top["category"]}</b> at <b>{top["fraud_rate"]:.1f}%</b>.
-            {"Category is a <b>significant</b> fraud predictor." if p_c<0.05 else "No significant association."}
-          </div>
-        </div>""", unsafe_allow_html=True)
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Highest Risk Category", f"{top['category']}")
+    m2.metric("Top Fraud Rate", f"{top['fraud_rate']:.2f}%")
+    m3.metric("p-value", f"{p_c:.4f}")
+    m4.metric("DoF", f"{dof_c}")
 
-    # Stacked volume bar
-    cat_vol = cat_s.sort_values("total", ascending=False)
+    cat_display = cat_s.sort_values("fraud_rate", ascending=False).head(12).sort_values("fraud_rate", ascending=True)
+    cat_vol = cat_s.sort_values("total", ascending=False).head(12)
+
+    fig = go.Figure(go.Bar(
+        y=cat_display["category"], x=cat_display["fraud_rate"], orientation="h",
+        marker_color=COLORS["purple"],
+        text=cat_display["fraud_rate"].apply(lambda x: f"{x:.1f}%"),
+        textposition="outside",
+    ))
+    fig.update_layout(base_layout(title="Top 12 Categories by Fraud Rate", height=360,
+                                  xaxis=dict(title="Fraud Rate (%)", ticksuffix="%"),
+                                  yaxis=dict(title="")))
+    st.plotly_chart(fig, use_container_width=True)
+
     fig = go.Figure()
     fig.add_trace(go.Bar(x=cat_vol["category"], y=cat_vol["legit_count"],
                          name="Legitimate", marker_color=COLORS["legit"], opacity=0.8))
     fig.add_trace(go.Bar(x=cat_vol["category"], y=cat_vol["fraud_count"],
                          name="Fraudulent", marker_color=COLORS["fraud"]))
-    fig.update_layout(base_layout(title="Transaction Volume by Category",
-                                  barmode="stack", height=320,
+    fig.update_layout(base_layout(title="Top 12 Categories by Volume",
+                                  barmode="stack", height=360,
                                   xaxis=dict(tickangle=-30),
                                   legend=dict(orientation="h", y=-0.22)))
     st.plotly_chart(fig, use_container_width=True)
 
-
 # TAB 4: TRANSACTION AMOUNT & DISTANCE ANALYSIS
 # This tab tests if fraud has different amounts and distances
 with tab4:
-    st.markdown("""
-    <div class="hyp-card">
-      <span class="chip chip-blue">H3</span>
-      <div class="hyp-title">Transaction Amount & Geographic Distance</div>
-      <div class="hyp-body">
-        <b>Research Hypothesis:</b> Fraudulent transactions will show significantly higher average
-        transaction amounts and greater home-to-merchant distances than legitimate ones.<br><br>
-        <b>Null Hypothesis H₀:</b> No significant difference in amount or distance between
-        fraudulent and legitimate transactions.
-      </div>
-    </div>""", unsafe_allow_html=True)
+    st.markdown('<div class="sec-head">AMOUNT & DISTANCE ANALYSIS</div>', unsafe_allow_html=True)
+    st.caption("Compare amount and distance behavior for fraud vs legitimate transactions.")
 
     fa = dff.loc[dff["is_fraud"]==1,"amt"].dropna()
     la = dff.loc[dff["is_fraud"]==0,"amt"].dropna()
@@ -608,28 +633,11 @@ with tab4:
     u_amt,  p_amt  = stats.mannwhitneyu(fa, la, alternative="greater") if len(fa)>0 else (0,1)
     u_dist, p_dist = stats.mannwhitneyu(fd, ld, alternative="greater") if len(fd)>0 else (0,1)
 
-    def mini_kpi(col, label, fval, lval, fmt=".2f"):
-        col.markdown(f"""
-        <div class="kpi-card" style="padding:14px 16px;">
-          <div class="kpi-label">{label}</div>
-          <div style="display:flex;gap:16px;margin-top:6px;">
-            <div>
-              <div style="font-size:9px;color:#ff456088;letter-spacing:1px;">FRAUD</div>
-              <div style="font-family:Syne,sans-serif;font-size:18px;font-weight:800;color:#ff4560;">{fval:{fmt}}</div>
-            </div>
-            <div>
-              <div style="font-size:9px;color:#00e5ff88;letter-spacing:1px;">LEGIT</div>
-              <div style="font-family:Syne,sans-serif;font-size:18px;font-weight:800;color:#00e5ff;">{lval:{fmt}}</div>
-            </div>
-          </div>
-        </div>""", unsafe_allow_html=True)
-
-    k1,k2,k3,k4 = st.columns(4)
-    mini_kpi(k1,"Mean Amount ($)",   fa.mean(),   la.mean())
-    mini_kpi(k2,"Median Amount ($)", fa.median(), la.median())
-    mini_kpi(k3,"Mean Distance (km)",fd.mean(),   ld.mean())
-    mini_kpi(k4,"Median Dist (km)",  fd.median(), ld.median())
-    st.markdown("<br>", unsafe_allow_html=True)
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Mean Amount ($)", f"{fa.mean():.2f}", delta=f"Legit {la.mean():.2f}")
+    k2.metric("Median Amount ($)", f"{fa.median():.2f}", delta=f"Legit {la.median():.2f}")
+    k3.metric("Mean Distance (km)", f"{fd.mean():.2f}", delta=f"Legit {ld.mean():.2f}")
+    k4.metric("Median Dist (km)", f"{fd.median():.2f}", delta=f"Legit {ld.median():.2f}")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -641,16 +649,9 @@ with tab4:
         fig.update_layout(base_layout(title="Transaction Amount", height=380,
                                       yaxis=dict(title="Amount ($)")))
         st.plotly_chart(fig, use_container_width=True)
-        chip = "chip-red" if p_amt<0.05 else "chip-green"
-        st.markdown(f"""
-        <div class="hyp-card">
-          <div class="kpi-label">Mann-Whitney U · Amount</div>
-          <span class="chip {chip}">{"REJECT H₀" if p_amt<0.05 else "FAIL TO REJECT H₀"}</span>
-          <div class="hyp-finding" style="margin-top:8px;">
-            U={u_amt:,.0f}, p={p_amt:.4f} — {"Fraud transactions have <b>significantly higher</b> amounts."
-            if p_amt<0.05 else "No significant difference in amounts."}
-          </div>
-        </div>""", unsafe_allow_html=True)
+        st.caption(
+            f"Amount test · U={u_amt:,.0f}, p={p_amt:.4f} · {'Significant' if p_amt<0.05 else 'Not Significant'}"
+        )
 
     with c2:
         fig = go.Figure()
@@ -661,16 +662,9 @@ with tab4:
         fig.update_layout(base_layout(title="Home → Merchant Distance", height=380,
                                       yaxis=dict(title="Distance (km)")))
         st.plotly_chart(fig, use_container_width=True)
-        chip = "chip-red" if p_dist<0.05 else "chip-green"
-        st.markdown(f"""
-        <div class="hyp-card">
-          <div class="kpi-label">Mann-Whitney U · Distance</div>
-          <span class="chip {chip}">{"REJECT H₀" if p_dist<0.05 else "FAIL TO REJECT H₀"}</span>
-          <div class="hyp-finding" style="margin-top:8px;">
-            U={u_dist:,.0f}, p={p_dist:.4f} — {"Fraud occurs at <b>significantly greater</b> distances."
-            if p_dist<0.05 else "No significant difference in distance."}
-          </div>
-        </div>""", unsafe_allow_html=True)
+        st.caption(
+            f"Distance test · U={u_dist:,.0f}, p={p_dist:.4f} · {'Significant' if p_dist<0.05 else 'Not Significant'}"
+        )
 
     # Scatter: amount vs distance
     sample = dff.sample(min(2000, len(dff)), random_state=42)
@@ -689,41 +683,30 @@ with tab4:
 # This tab shows how well our machine learning model is working
 with tab5:
     st.markdown('<div class="sec-head">MODEL PERFORMANCE</div>', unsafe_allow_html=True)
+    st.caption("Core classification quality and threshold behavior for the current filter selection.")
 
-    c1, c2 = st.columns(2)
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Accuracy", f"{accuracy:.1%}")
+    m2.metric("Precision", f"{precision:.1%}")
+    m3.metric("Recall", f"{recall:.1%}")
+    m4.metric("F1", f"{f1:.3f}")
 
     # Confusion matrix heatmap
-    with c1:
-        cm = np.array([[tn, fp],[fn, tp]])
-        text_cm = [[f"TN<br>{tn:,}", f"FP<br>{fp:,}"],
-                   [f"FN<br>{fn:,}", f"TP<br>{tp:,}"]]
-        fig = go.Figure(go.Heatmap(
-            z=cm, text=text_cm, texttemplate="%{text}",
-            colorscale=[[0,"#0b1929"],[1,"#1a3a60"]],
-            showscale=False, xgap=4, ygap=4,
-        ))
-        fig.update_layout(base_layout(
-            title=f"Confusion Matrix (threshold={threshold:.2f})", height=320,
-            xaxis=dict(tickvals=[0,1], ticktext=["Pred Legit","Pred Fraud"], title=""),
-            yaxis=dict(tickvals=[0,1], ticktext=["Actual Legit","Actual Fraud"], title=""),
-        ))
-        fig.update_traces(textfont=dict(family="Syne,sans-serif", size=14, color="#f0f6ff"))
-        st.plotly_chart(fig, use_container_width=True)
-
-    # Metrics bar
-    with c2:
-        metrics = {"Accuracy":accuracy,"Precision":precision,"Recall":recall,"F1 Score":f1}
-        fig = go.Figure(go.Bar(
-            x=list(metrics.keys()), y=list(metrics.values()),
-            marker=dict(color=list(metrics.values()),
-                        colorscale=[[0,"#1a3050"],[0.5,"#7c3aed"],[1,"#00e676"]],
-                        showscale=False),
-            text=[f"{v:.1%}" for v in metrics.values()],
-            textposition="outside",
-        ))
-        fig.update_layout(base_layout(title="Model Metrics at Current Threshold", height=320,
-                                      yaxis=dict(range=[0,1.15], tickformat=".0%")))
-        st.plotly_chart(fig, use_container_width=True)
+    cm = np.array([[tn, fp],[fn, tp]])
+    text_cm = [[f"TN<br>{tn:,}", f"FP<br>{fp:,}"],
+               [f"FN<br>{fn:,}", f"TP<br>{tp:,}"]]
+    fig = go.Figure(go.Heatmap(
+        z=cm, text=text_cm, texttemplate="%{text}",
+        colorscale=[[0,"#0b1929"],[1,"#1a3a60"]],
+        showscale=False, xgap=4, ygap=4,
+    ))
+    fig.update_layout(base_layout(
+        title=f"Confusion Matrix (threshold={threshold:.2f})", height=320,
+        xaxis=dict(tickvals=[0,1], ticktext=["Pred Legit","Pred Fraud"], title=""),
+        yaxis=dict(tickvals=[0,1], ticktext=["Actual Legit","Actual Fraud"], title=""),
+    ))
+    fig.update_traces(textfont=dict(family="Syne,sans-serif", size=14, color="#f0f6ff"))
+    st.plotly_chart(fig, use_container_width=True)
 
     # Score distribution
     fig = go.Figure()
